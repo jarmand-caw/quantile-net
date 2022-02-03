@@ -17,7 +17,7 @@ from qnet import Config
 from qnet.data import Data
 from qnet.loss import MultiTaskWrapper
 from qnet.models import QuantileNet
-from qnet.utils import EmbedDataset, use_optimizer
+from qnet.nn_utils import EmbedDataset, use_optimizer
 
 logger = logging.getLogger(__file__)
 
@@ -59,7 +59,7 @@ class Engine(object):
 
         if load_from_checkpoint:
             assert df_init is None, "if initializing from transformer, cannot give a df"
-            assert (datatransformer is not None) & (
+            assert (data_transformer is not None) & (
                 trained_model is not None
             ), "if initializing from transformer, must add the transformer"
 
@@ -79,13 +79,13 @@ class Engine(object):
         if not load_from_checkpoint:
             num_embeddings = []
             for col in (
-                self.data_transformer.cat_cols + self.data_transformer.bagged_cat_cols
+                self.data_transformer.config.categorical_features + self.data_transformer.config.multi_label_categorical_features
             ):
                 num_embeddings.append(len(self.data_transformer.category_map_dict[col]))
 
             self.train_config.num_embeddings = num_embeddings
             self.train_config.num_continuous_features = len(
-                self.data_transformer.cont_cols
+                self.data_transformer.config.continuous_features
             )
 
             if self.train_config.embedding_dims is None:
@@ -212,21 +212,15 @@ class Engine(object):
         self.best_model = None
 
         self.model_config_file_path = None
-        self.scaler_file_path = None
-        self.category_map_path = None
+        self.train_config_file_path = None
         self.model_path = None
-        if self.model_config.yeo_transform:
-            self.lambda_dict_path = None
         self.data_transformer_path = None
         self.existing_embeddings = None
+        self.embeddings_path = None
 
     def train_single_batch(self, kwargs):
         self.opt.zero_grad()
-        if self._mtl_flag:
-            loss = self.mtl(kwargs)
-        else:
-            pred = self.model(**kwargs)
-            loss = self.crit(pred, kwargs["target"].float().view(-1).to(self.device))
+        loss = self.mtl(kwargs)
         loss.backward()
         self.opt.step()
         loss_item = loss.item()
@@ -234,15 +228,9 @@ class Engine(object):
 
     def _set_model_mode(self, mode):
         if mode == "train":
-            if self._mtl_flag:
-                self.mtl.model.train()
-            else:
-                self.model.train()
+            self.mtl.model.train()
         elif mode == "eval":
-            if self._mtl_flag:
-                self.mtl.model.eval()
-            else:
-                self.model.eval()
+            self.mtl.model.eval()
         else:
             raise NotImplementedError(
                 "options for positional argument mode are 'train' or 'eval'"
@@ -280,24 +268,12 @@ class Engine(object):
                 test_loader = self.val_loader
             for i, batch in enumerate(test_loader):
                 if for_kfold:
-                    if self._mtl_flag:
-                        pred = self.mtl.model(**batch).to("cpu")
-                        all_preds = torch.cat((all_preds, pred))
-                        all_y += list(batch["target"].float().view(-1).to("cpu"))
-                    else:
-                        pred = self.model(**batch)
-                        all_preds = torch.cat((all_preds, pred.to("cpu")))
-                        all_y += list(batch["target"].float().view(-1).to("cpu"))
+                    pred = self.mtl.model(**batch).to("cpu")
+                    all_preds = torch.cat((all_preds, pred))
+                    all_y += list(batch["target"].float().view(-1).to("cpu"))
                 else:
-                    if self._mtl_flag:
-                        loss = self.mtl(batch)
-                        total_loss += loss.item()
-                    else:
-                        pred = self.model(**batch)
-                        loss = self.crit(
-                            pred, batch["target"].float().view(-1).to(self.device)
-                        ).item()
-                        total_loss += loss
+                    loss = self.mtl(batch)
+                    total_loss += loss.item()
 
             if for_kfold:
                 return all_y, all_preds
@@ -328,10 +304,7 @@ class Engine(object):
                     self.scheduler.step(loss)
             if loss < self.best_loss:
                 self.best_loss = copy.deepcopy(loss)
-                if self._mtl_flag:
-                    self.best_model = copy.deepcopy(self.mtl.model.state_dict())
-                else:
-                    self.best_model = copy.deepcopy(self.model.state_dict())
+                self.best_model = copy.deepcopy(self.mtl.model.state_dict())
                 self.count = 0
             else:
                 self.count += 1
@@ -341,10 +314,7 @@ class Engine(object):
                 if self.best_model is None:
                     pass
                 else:
-                    if self._mtl_flag:
-                        self.mtl.model.load_state_dict(self.best_model)
-                    else:
-                        self.model.load_state_dict(self.best_model)
+                    self.mtl.model.load_state_dict(self.best_model)
                 break
 
     def get_model_building_config(self):
@@ -381,12 +351,8 @@ class Engine(object):
         self._set_model_mode("eval")
 
         combined_vector = None
-        if self._mtl_flag:
-            for batch in dataloader:
-                combined_vector = self.mtl.model(return_embeddings=True, **batch)
-        else:
-            for batch in dataloader:
-                combined_vector = self.model(return_embeddings=True, **batch)
+        for batch in dataloader:
+            combined_vector = self.mtl.model(return_embeddings=True, **batch)
 
         self.existing_embeddings = combined_vector.to("cpu")
 
@@ -417,13 +383,11 @@ class Engine(object):
             {**vars(self.train_config), **vars(self.model_config)},
             open(self.train_config_file_path, "w"),
         )
-        if self._mtl_flag:
-            torch.save(
-                self.mtl.model.state_dict(),
-                self.model_path,
-            )
-        else:
-            torch.save(self.model.state_dict(), self.model_path)
+        torch.save(
+            self.mtl.model.state_dict(),
+            self.model_path,
+        )
+
         joblib.dump(self.data_transformer, open(self.data_transformer_path, "wb"))
         if save_embeddings:
             self.embeddings_path = os.path.join(dir, self.embeddings_file_name)
@@ -458,7 +422,7 @@ class Engine(object):
             train_config,
             model_config,
             load_from_checkpoint=True,
-            datatransformer=data_transformer,
+            data_transformer=data_transformer,
             trained_model=model,
         )
 
@@ -467,7 +431,7 @@ class Engine(object):
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
-    from modeling_tools.log_init import initialize_logger
+    from qnet.log_init import initialize_logger
 
     initialize_logger()
     parser = ArgumentParser(description="Train a model to go into production")
@@ -505,9 +469,9 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(
             "Data type not implemented. Must be csv or json. {}".format(args.data_path.split(".")[-1]))
-    train_config = yaml.full_load(open(args.train_config_path))
-    model_config = yaml.full_load(open(args.model_config_path))
-    engine = Engine(train_config, model_config, df_init=df)
-    engine.train()
-    dir = engine.save(args.save_dir, save_embeddings=True)
-    logger.info("Successfully saved at {}".format(dir))
+    this_train_config = yaml.full_load(open(args.train_config_path))
+    this_model_config = yaml.full_load(open(args.model_config_path))
+    this_engine = Engine(this_train_config, this_model_config, df_init=df)
+    this_engine.train()
+    this_dir = this_engine.save(args.save_dir, save_embeddings=True)
+    logger.info("Successfully saved at {}".format(this_dir))

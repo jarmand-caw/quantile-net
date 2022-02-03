@@ -19,8 +19,8 @@ class MultiTaskWrapper(nn.Module):
 
     def forward(self, kwargs):
         out = self.model(**kwargs)
-        pred = out[:, 1]
-        quantile_pred = out[:, -1]
+        pred = out[:, -1]
+        quantile_pred = out[:, :-1]
 
         target = kwargs["target"].float().view(-1).to(self.device)
         mse_loss = self.mse_crit(pred, target)

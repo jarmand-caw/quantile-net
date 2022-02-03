@@ -4,7 +4,6 @@ from logging import getLogger
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import mean_squared_error
 from torch.utils.data import Dataset
 
 

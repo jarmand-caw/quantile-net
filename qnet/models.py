@@ -24,7 +24,7 @@ class QuantileNet(nn.Module):
         if type(config) == dict:
             self.config = Config(copy.copy(config))
         else:
-            self.config = copy.copy(config)
+            self.config = copy.deepcopy(config)
 
         torch.manual_seed(self.config.seed)
         np.random.seed(self.config.seed)
@@ -69,7 +69,7 @@ class QuantileNet(nn.Module):
             self.categorical_layer_sizes.insert(0, self.total_embedding_dim)
 
         if not ((self.config.categorical_features is None) and (self.config.multi_label_categorical_features is None)):
-            if self.num_cont>0:
+            if self.config.num_continuous_features>0:
                 self.first_bottom_size = (
                     self.categorical_layer_sizes[-1] + self.continuous_layer_sizes[-1]
                 )
@@ -81,7 +81,7 @@ class QuantileNet(nn.Module):
         self.final_layer_sizes = self.config.final_layers
         self.final_layer_sizes.insert(0, self.first_bottom_size)
 
-        if self.num_cont > 0:
+        if self.config.num_continuous_features > 0:
             self.cont_layers = nn.ModuleList()
             for idx in range(len(self.continuous_layer_sizes) - 1):
                 in_size = self.continuous_layer_sizes[idx]
@@ -121,7 +121,7 @@ class QuantileNet(nn.Module):
         cont_output = None
         cat_output = None
 
-        if self.num_cont > 0:
+        if self.config.num_continuous_features > 0:
             cont = kwargs.pop("cont")
             cont = cont.float().to(self.device)
             batch_size = cont.shape[0]
@@ -151,7 +151,7 @@ class QuantileNet(nn.Module):
         if return_embeddings:
             return torch.cat([cat_vector, cont_output], dim=-1)
 
-        if self.num_cont == 0:
+        if self.config.num_continuous_features == 0:
             combined_vector = cat_output
         elif (len(self.config.categorical_features) + len(self.config.multi_label_categorical_features)) == 0:
             combined_vector = cont_output

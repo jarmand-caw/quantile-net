@@ -4,3 +4,4 @@ torch == 1.10.2
 pyyaml == 6.0
 pandas == 1.4.0
 optuna == 2.10.0
+plotly == 5.5.0

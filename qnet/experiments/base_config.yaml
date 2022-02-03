@@ -1,0 +1,62 @@
+embedding_dims: null
+num_epochs: 500
+quantiles:
+  - 0.0001
+  - 0.001
+  - 0.005
+  - 0.025
+  - 0.05
+  - 0.1
+  - 0.15
+  - 0.2
+  - 0.25
+  - 0.3
+  - 0.35
+  - 0.4
+  - 0.45
+  - 0.5
+  - 0.55
+  - 0.6
+  - 0.65
+  - 0.7
+  - 0.75
+  - 0.8
+  - 0.85
+  - 0.9
+  - 0.95
+  - 0.975
+  - 0.995
+  - 0.999
+  - 0.9999
+
+train_shuffle_method: fixed
+shuffle_val: true
+val_size: 0.1
+verbose: false
+patience: 20
+seed: 0
+
+continuous_layers:
+  - 1000
+  - 750
+
+categorical_layers: []
+
+final_layers:
+  - 500
+  - 500
+
+optimizer: adam
+use_scheduler: true
+epochs_before_scheduler: 15
+
+
+dropout: null
+lr: null
+momentum: 0.9
+l2_regularization: null
+batch_size: null
+
+device: null
+num_embeddings: null
+num_continuous_features: null
